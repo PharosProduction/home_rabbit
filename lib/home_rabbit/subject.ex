@@ -1,6 +1,6 @@
 defmodule HomeRabbit.Subject do
   require Logger
-  import HomeRabbit.Exchange
+  import HomeRabbit.Configuration.ExchangeBuilder
 
   use GenServer
   use AMQP
@@ -20,6 +20,10 @@ defmodule HomeRabbit.Subject do
     GenServer.start_link(__MODULE__, nil, name: __MODULE__)
   end
 
+  def publish(message) do
+    GenServer.cast(__MODULE__, {:publish, message})
+  end
+
   # Server
   @impl true
   def init(_opts) do
@@ -29,8 +33,18 @@ defmodule HomeRabbit.Subject do
     [@errors_exchange | Application.get_env(:home_rabbit, :exchanges, [@default_exchange])]
     |> Enum.each(&setup_exchange(chan, &1))
 
+    :ok = Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
+
     {:ok, chan}
   end
+
+  @impl true
+  def handle_cast({:publish, message}, chan) do
+    #Basic.publish(chan, exchange, routing_key, payload, options)
+    {:noreply, chan}
+  end
+
+  # Setup
 
   defp setup_exchange(chan, {exchange, type, queues}) do
     with :ok <- Exchange.declare(chan, exchange, type, durable: true) do
