@@ -1,13 +1,11 @@
-defmodule HomeRabbit.Subject do
-  require Logger
+defmodule HomeRabbit.ChannelPool do
+  alias HomeRabbit.ConnectionManager
+  alias AMQP.{Channel, Basic, Queue, Exchange}
+
   import HomeRabbit.Configuration.ExchangeBuilder
+  require Logger
 
   use GenServer
-  use AMQP
-
-  @default_exchange_name "default_exchange"
-  @default_queue "default_queue"
-  @default_exchange fanout(@default_exchange_name, [queue(@default_queue)])
 
   @errors_exchange_name "errors_exchange"
   @errors_queue "errors_queue"
@@ -20,28 +18,67 @@ defmodule HomeRabbit.Subject do
     GenServer.start_link(__MODULE__, nil, name: __MODULE__)
   end
 
-  def publish(message) do
-    GenServer.cast(__MODULE__, {:publish, message})
+  def release_channel(channel) do
+    GenServer.cast(__MODULE__, {:release_channel, channel})
+  end
+
+  def get_channel() do
+    GenServer.call(__MODULE__, :get_channel)
   end
 
   # Server
   @impl true
   def init(_opts) do
-    {:ok, con} = HomeRabbit.Server.get_connection()
+    {:ok, con} = ConnectionManager.get_connection()
     {:ok, chan} = Channel.open(con)
 
-    [@errors_exchange | Application.get_env(:home_rabbit, :exchanges, [@default_exchange])]
+    [@errors_exchange | Application.get_env(:home_rabbit, :exchanges, [])]
     |> Enum.each(&setup_exchange(chan, &1))
 
+      # TODO: do I really need this?
     :ok = Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
 
-    {:ok, chan}
+    {:ok, [chan]}
   end
 
   @impl true
-  def handle_cast({:publish, message}, chan) do
-    #Basic.publish(chan, exchange, routing_key, payload, options)
-    {:noreply, chan}
+  def handle_call(:get_channel, _from, pool) do
+    if pool |> Enum.any?() do
+      [chan | rest] = pool
+      {:reply, {:ok, chan}, rest}
+    else
+      {:ok, con} = ConnectionManager.get_connection()
+      {:ok, chan} = Channel.open(con)
+
+      # TODO: do I really need this?
+      :ok =
+        Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
+
+      {:reply, {:ok, chan}, pool}
+    end
+  end
+
+  @impl true
+  def handle_cast({:release_channel, channel}, pool) do
+    limit = Application.get_env(:home_rabbit, :max_cannels, :infinite)
+    count = Enum.count(pool)
+    Logger.debug("Channel limit: #{limit}")
+
+    case limit do
+      limit when limit == :infinite or limit > count ->
+        Logger.debug("Channel count: #{count + 1}")
+        {:noreply, [channel | pool]}
+
+      limit when limit <= count ->
+        Channel.close(channel)
+        Logger.debug("Channel count: #{count}")
+        {:noreply, pool}
+
+      wrong_argument ->
+        Logger.warn("Wrong configuration for :home_rabbit :max_channels: #{wrong_argument}")
+        Logger.debug("Channel count: #{count + 1}")
+        {:noreply, [channel | pool]}
+    end
   end
 
   # Setup

@@ -1,4 +1,4 @@
-defmodule HomeRabbit.Server do
+defmodule HomeRabbit.ConnectionManager do
   alias AMQP.Connection
 
   require Logger

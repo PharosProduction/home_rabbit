@@ -1,8 +1,7 @@
 defmodule HomeRabbitTest do
   use ExUnit.Case
-  doctest HomeRabbit
+  doctest HomeRabbit.Observer
 
   test "greets the world" do
-    assert HomeRabbit.hello() == :world
   end
 end

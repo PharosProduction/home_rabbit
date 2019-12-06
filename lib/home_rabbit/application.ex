@@ -7,8 +7,8 @@ defmodule HomeRabbit.Application do
 
   def start(_type, _args) do
     children = [
-      {HomeRabbit.Server, nil},
-      {HomeRabbit.Subject, nil}
+      {HomeRabbit.ConnectionManager, nil},
+      {HomeRabbit.ChannelPool, nil}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
