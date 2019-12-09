@@ -35,6 +35,7 @@ defmodule HomeRabbit do
               options: options
             }
 
+  @spec publish(message :: HomeRabbit.message()) :: :ok | {:error, reason :: term}
   def publish(%{exchange: exchange, routing_key: routing_key, payload: payload} = message) do
     {:ok, chan} = ChannelPool.get_channel()
     :ok = Basic.publish(chan, exchange, routing_key, payload, message |> Map.get(:options, []))

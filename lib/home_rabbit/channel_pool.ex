@@ -10,7 +10,7 @@ defmodule HomeRabbit.ChannelPool do
   @errors_exchange_name "errors_exchange"
   @errors_queue "errors_queue"
   @errors_exchange direct(@errors_exchange_name, [
-                     queue(@errors_queue, routing_key: @errors_queue)
+                     {@errors_queue, @errors_queue}
                    ])
 
   # Client
@@ -35,7 +35,7 @@ defmodule HomeRabbit.ChannelPool do
     [@errors_exchange | Application.get_env(:home_rabbit, :exchanges, [])]
     |> Enum.each(&setup_exchange(chan, &1))
 
-      # TODO: do I really need this?
+    # TODO: do I really need this?
     :ok = Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
 
     {:ok, [chan]}
