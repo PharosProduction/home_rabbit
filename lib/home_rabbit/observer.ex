@@ -57,6 +57,11 @@ defmodule HomeRabbit.Observer do
         {:noreply, chan}
       end
 
+      @impl true
+      def handle_info({_ref, :ok}, %AMQP.Channel{} = chan) do
+        {:noreply, chan}
+      end
+
       # Sent by the broker when the consumer is unexpectedly cancelled (such as after a queue deletion)
       @impl true
       def handle_info({:basic_cancel, %{consumer_tag: consumer_tag}}, chan) do
@@ -78,7 +83,7 @@ defmodule HomeRabbit.Observer do
           KV.put(@max_retries, tag, @queue_cache_table)
         end
 
-        Task.async(fn -> consume(chan, tag, payload) end)
+        consume(chan, tag, payload)
         {:noreply, chan}
       end
 
@@ -101,7 +106,12 @@ defmodule HomeRabbit.Observer do
             KV.put(retries_left - 1, tag, @queue_cache_table)
         catch
           :exit, reason ->
-            Logger.error("EXIT signal with #{reason} - fail to process a message:\n#{payload}\nQueue:#{@queue}")
+            Logger.error(
+              "EXIT signal with #{reason} - fail to process a message:\n#{payload}\nQueue:#{
+                @queue
+              }"
+            )
+
             status = Queue.status(chan, @queue)
             Logger.error("Queue status: #{inspect(status)}")
         end
