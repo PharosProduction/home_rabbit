@@ -9,9 +9,10 @@ defmodule HomeRabbit.ChannelPool do
 
   @errors_exchange_name "errors_exchange"
   @errors_queue "errors_queue"
-  @errors_exchange direct(@errors_exchange_name, [
-                     {@errors_queue, @errors_queue}
-                   ])
+
+  direct(@errors_exchange_name, [
+    queue(@errors_queue, @errors_queue)
+  ])
 
   # Client
   def start_link(_opts) do
@@ -32,7 +33,13 @@ defmodule HomeRabbit.ChannelPool do
     {:ok, con} = ConnectionManager.get_connection()
     {:ok, chan} = Channel.open(con)
 
-    [@errors_exchange | Application.get_env(:home_rabbit, :exchanges, [])]
+    case Application.get_env(:home_rabbit, :exchanges_configuration) do
+      nil -> nil
+      settings when settings |> is_list() -> settings |> Enum.each(&read_settings/1)
+      settings -> read_settings(settings)
+    end
+
+    Application.get_env(:home_rabbit, :exchanges)
     |> Enum.each(&setup_exchange(chan, &1))
 
     # TODO: do I really need this?
@@ -146,5 +153,10 @@ defmodule HomeRabbit.ChannelPool do
         ]
       )
     end
+  end
+
+  defp read_settings({application_name, file}) do
+    priv_dir = :code.priv_dir(application_name)
+    Path.expand(file, priv_dir) |> Code.eval_file()
   end
 end
