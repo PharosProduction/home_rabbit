@@ -1,21 +1,6 @@
 defmodule HomeRabbit.Observer do
   @moduledoc """
   Documentation for HomeRabbit.Observer
-
-  ## Examples
-  ```elixir
-    iex> defmodule TestObserver do
-    ...>   use HomeRabbit.Observer, queue: "default_queue"
-    ...>   @impl true
-    ...>   def handle(message) do
-    ...>     Logger.debug(message)
-    ...>   end
-    ...> end
-    ...> start_supervised!(TestObserver)
-    ...> HomeRabbit.publish(%{exchange: "", routing_key: "", payload: "Hello World"})
-    :ok
-
-  ```
   """
 
   @callback handle(payload :: term) :: :ok | {:error, reason :: term}
@@ -87,9 +72,15 @@ defmodule HomeRabbit.Observer do
         {:noreply, chan}
       end
 
+      @impl true
+      def terminate(reason, chan) do
+        ChannelPool.release_channel(chan)
+        Logger.error("Terminating with #{reason |> inspect()}")
+      end
+
       defp consume(chan, tag, payload) do
         try do
-          Logger.debug("Message received: #{payload |> inspect()}")
+          Logger.debug("Message received: #{tag}")
           :ok = handle(payload)
           :ok = Basic.ack(chan, tag)
         rescue
@@ -107,7 +98,7 @@ defmodule HomeRabbit.Observer do
         catch
           :exit, reason ->
             Logger.error(
-              "EXIT signal with #{reason} - fail to process a message:\n#{payload}\nQueue:#{
+              "EXIT signal with #{reason |> inspect()} - fail to process a message:\n#{payload}\nQueue:#{
                 @queue
               }"
             )

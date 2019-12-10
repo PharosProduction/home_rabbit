@@ -10,10 +10,6 @@ defmodule HomeRabbit.ChannelPool do
   @errors_exchange_name "errors_exchange"
   @errors_queue "errors_queue"
 
-  direct(@errors_exchange_name, [
-    queue(@errors_queue, @errors_queue)
-  ])
-
   # Client
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -32,6 +28,10 @@ defmodule HomeRabbit.ChannelPool do
   def init(_opts) do
     {:ok, con} = ConnectionManager.get_connection()
     {:ok, chan} = Channel.open(con)
+
+    direct(@errors_exchange_name, [
+      queue(@errors_queue, @errors_queue)
+    ])
 
     case Application.get_env(:home_rabbit, :exchanges_configuration) do
       nil -> nil
