@@ -1,11 +1,7 @@
-defmodule HomeRabbit.Configuration.QueueBuilder do
+defmodule HomeRabbit.Exchange.Headers do
   alias AMQP.Basic
   @type x_match :: :any | :all
   @type x_match_arguments :: {key :: String.t(), value :: term}
-  @type fanout_queue_configuration :: Basic.queue()
-  @type direct_queue_configuration :: {queue :: Basic.queue(), routing_key :: Basic.routing_key()}
-  @type topic_queue_configuration :: {queue :: Basic.queue(), routing_key :: Basic.routing_key()}
-
   @typedoc """
     {"x-match", "any"} | {"x-match", "all"}
   """
@@ -14,15 +10,17 @@ defmodule HomeRabbit.Configuration.QueueBuilder do
           {queue :: Basic.queue(), arguments :: x_match_arguments,
            x_match :: x_match_configuration}
 
-  @spec queue(queue :: Basic.queue()) :: fanout_queue_configuration
-  def queue(queue) do
-    queue
-  end
-
-  @spec queue(queue :: Basic.queue(), key :: Basic.routing_key()) ::
-          direct_queue_configuration | topic_queue_configuration
-  def queue(queue, key) do
-    {queue, key}
+  defmacro __using__(opts) do
+    quote location: :keep, bind_quoted: [opts: opts] do
+      use HomeRabbit.Exchange,
+        exchange: opts[:exchange],
+        type: :headers,
+        qeues:
+          opts[:queues]
+          |> Enum.map(fn [queue: queue, x_match: x_match, arguments: arguments] ->
+            HomeRabbit.Exchange.Headers.queue(queue, x_match, arguments)
+          end)
+    end
   end
 
   @spec queue(queue :: Basic.queue(), match :: :any, arguments :: x_match_arguments) ::
@@ -37,3 +35,4 @@ defmodule HomeRabbit.Configuration.QueueBuilder do
     {queue, arguments, {"x-match", "all"}}
   end
 end
+

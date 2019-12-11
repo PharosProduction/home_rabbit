@@ -2,13 +2,9 @@ defmodule HomeRabbit.ChannelPool do
   alias HomeRabbit.ConnectionManager
   alias AMQP.{Channel, Basic, Queue, Exchange}
 
-  import HomeRabbit.Configuration.ExchangeBuilder
   require Logger
 
   use GenServer
-
-  @errors_exchange_name "errors_exchange"
-  @errors_queue "errors_queue"
 
   # Client
   def start_link(_opts) do
@@ -28,19 +24,6 @@ defmodule HomeRabbit.ChannelPool do
   def init(_opts) do
     {:ok, con} = ConnectionManager.get_connection()
     {:ok, chan} = Channel.open(con)
-
-    direct(@errors_exchange_name, [
-      queue(@errors_queue, @errors_queue)
-    ])
-
-    case Application.get_env(:home_rabbit, :exchanges_configuration) do
-      nil -> nil
-      settings when settings |> is_list() -> settings |> Enum.each(&read_settings/1)
-      settings -> read_settings(settings)
-    end
-
-    Application.get_env(:home_rabbit, :exchanges)
-    |> Enum.each(&setup_exchange(chan, &1))
 
     # TODO: do I really need this?
     :ok = Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
@@ -85,73 +68,6 @@ defmodule HomeRabbit.ChannelPool do
         Logger.warn("Wrong configuration for :home_rabbit :max_channels: #{wrong_argument}")
         Logger.debug("Channel count: #{count + 1}")
         {:noreply, [channel | pool]}
-    end
-  end
-
-  # Setup
-
-  defp setup_exchange(chan, {exchange, type, queues}) do
-    with :ok <- Exchange.declare(chan, exchange, type, durable: true) do
-      Logger.debug("Exchange was declared:\nExchange: #{exchange}\nType: #{type |> inspect()}")
-
-      case type do
-        :fanout ->
-          queues
-          |> Enum.each(&setup_queue(chan, exchange, &1, fn -> Queue.bind(chan, &1, exchange) end))
-
-        :topic ->
-          queues
-          |> Enum.each(fn {queue, key} ->
-            setup_queue(chan, exchange, queue, fn ->
-              Queue.bind(chan, queue, exchange, routing_key: key)
-            end)
-          end)
-
-        :direct ->
-          queues
-          |> Enum.each(fn {queue, key} ->
-            setup_queue(chan, exchange, queue, fn ->
-              Queue.bind(chan, queue, exchange, routing_key: key)
-            end)
-          end)
-
-        :headers ->
-          queues
-          |> Enum.each(fn {queue, args, x_match} ->
-            setup_queue(chan, exchange, queue, fn ->
-              Queue.bind(chan, queue, exchange, arguments: args ++ [x_match])
-            end)
-          end)
-      end
-    else
-      {:error, reason} ->
-        Logger.error("Failed exchange setup:\nExchange: #{exchange}\nReason: #{reason}")
-    end
-  end
-
-  defp setup_queue(chan, exchange, queue, bind_fn) do
-    with {:ok, _res} <- declare_queue(chan, queue, @errors_queue),
-         :ok <- bind_fn.() do
-      Logger.debug(
-        "Queue was declared and bound to exchange:\nQueue: #{queue}\nExchange: #{exchange}"
-      )
-    else
-      {:error, reason} ->
-        Logger.error("Failed queue setup:\nQueue: #{queue}\nReason: #{reason}")
-    end
-  end
-
-  defp declare_queue(chan, queue, error_queue_name) do
-    if queue == error_queue_name do
-      Queue.declare(chan, queue, durable: true)
-    else
-      Queue.declare(chan, queue,
-        durable: true,
-        arguments: [
-          {"x-dead-letter-exchange", :longstr, @errors_exchange_name},
-          {"x-dead-letter-routing-key", :longstr, error_queue_name}
-        ]
-      )
     end
   end
 
