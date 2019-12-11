@@ -23,11 +23,17 @@ defmodule HomeRabbit do
           | {:app_id, String.t()}
   @type options :: [option]
   @type message ::
-          %{
+          [
             exchange: Basic.exchange(),
             routing_key: Basic.routing_key(),
-            payload: Basic.payload()
-          }
+            payload: Basic.payload(),
+            options: options
+          ]
+          | %{
+              exchange: Basic.exchange(),
+              routing_key: Basic.routing_key(),
+              payload: Basic.payload()
+            }
           | %{
               exchange: Basic.exchange(),
               routing_key: Basic.routing_key(),
@@ -36,6 +42,18 @@ defmodule HomeRabbit do
             }
 
   @spec publish(message :: HomeRabbit.message()) :: :ok | {:error, reason :: term}
+  def publish(exchange: exchange, routing_key: routing_key, payload: payload, options: options) do
+    {:ok, chan} = ChannelPool.get_channel()
+    :ok = Basic.publish(chan, exchange, routing_key, payload, options)
+    ChannelPool.release_channel(chan)
+  end
+
+  def publish(exchange: exchange, routing_key: routing_key, payload: payload) do
+    {:ok, chan} = ChannelPool.get_channel()
+    :ok = Basic.publish(chan, exchange, routing_key, payload, [])
+    ChannelPool.release_channel(chan)
+  end
+
   def publish(%{exchange: exchange, routing_key: routing_key, payload: payload} = message) do
     {:ok, chan} = ChannelPool.get_channel()
     :ok = Basic.publish(chan, exchange, routing_key, payload, message |> Map.get(:options, []))
