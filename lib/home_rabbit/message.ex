@@ -9,14 +9,22 @@ defmodule HomeRabbit.Message do
               payload: Basic.payload(),
               options: HomeRabbit.options()
             }
-      @enforce_keys [:exchange, :routing_key, :payload]
+
+      @enforce_keys (case {Keyword.has_key?(opts, :exchange),
+                           Keyword.has_key?(opts, :routing_key)} do
+                       {true, true} -> [:payload]
+                       {true, false} -> [:payload, :routing_key]
+                       {false, true} -> [:payload, :exchange]
+                       {false, false} -> [:payload, :exchange, :routing_key]
+                     end)
 
       case {Keyword.has_key?(opts, :exchange), Keyword.has_key?(opts, :routing_key)} do
-        {true, true} -> defstruct [:option, :payloads | opts]
-        {true, false} -> defstruct [:option, :payloads, :routing_key | opts]
-        {false, true} -> defstruct [:option, :payloads, :exchange | opts]
-        {false, false} -> defstruct [:option | @enforce_keys]
+        {true, true} -> [:payload, options: []] ++ opts
+        {true, false} -> [:payload, :routing_key, options: []] ++ opts
+        {false, true} -> [:payload, :exchange, options: []] ++ opts
+        {false, false} -> @enforce_keys ++ [options: []]
       end
+      |> defstruct
     end
   end
 end

@@ -1,6 +1,30 @@
 defmodule HomeRabbit.Observer do
   @moduledoc """
   Documentation for HomeRabbit.Observer
+
+  ## Examples
+  ```elixir
+    iex> defmodule TestObserverExchange do
+    ...>   use HomeRabbit.Exchange.Direct, exchange: "test_observer_exchange", queues: [[queue: "test_observer_queue", routing_key: "test_observer"]]
+    ...>   defmessage SayHiMessage do
+    ...>     def new() do
+    ...>       %SayHiMessage{routing_key: "test_observer", payload: "Hello from TestObserver"}
+    ...>     end
+    ...>   end
+    ...> end
+    iex> start_supervised!(TestObserverExchange)
+    iex> defmodule TestObserver do
+    ...>   use HomeRabbit.Observer, queue: "test_observer_queue"
+    ...>   @impl true
+    ...>   def handle(message) do
+    ...>     Logger.debug(message)
+    ...>   end
+    ...> end
+    ...> start_supervised!(TestObserver)
+    iex> TestObserverExchange.publish(TestObserverExchange.SayHiMessage.new())
+    :ok
+
+  ```
   """
 
   @callback handle(payload :: term) :: :ok | {:error, reason :: term}
@@ -26,6 +50,7 @@ defmodule HomeRabbit.Observer do
 
       @impl true
       def init(_) do
+        Process.flag(:trap_exit, true)
         {:ok, chan} = ChannelPool.get_channel()
         # Register the GenServer process as a consumer
         {:ok, _consumer_tag} = Basic.consume(chan, @queue)
@@ -73,9 +98,27 @@ defmodule HomeRabbit.Observer do
       end
 
       @impl true
+      def handle_info({:EXIT, _from, reason}, chan) do
+        ChannelPool.release_channel(chan)
+
+        case reason do
+          :shutdown -> Logger.info("#{__MODULE__} exiting with reason: :shutdown")
+          reason -> Logger.error("#{__MODULE__} exiting with reason: #{reason |> inspect()}")
+        end
+
+        {:stop, reason, nil}
+      end
+
+      @impl true
       def terminate(reason, chan) do
         ChannelPool.release_channel(chan)
-        Logger.error("Terminating with #{reason |> inspect()}")
+
+        case reason do
+          :shutdown -> Logger.info("#{__MODULE__} terminating with reason: :shutdown")
+          reason -> Logger.error("#{__MODULE__} terminating with reason: #{reason |> inspect()}")
+        end
+
+        nil
       end
 
       defp consume(chan, tag, payload) do
@@ -95,16 +138,6 @@ defmodule HomeRabbit.Observer do
 
             Basic.reject(chan, tag, retries_left > 0)
             KV.put(retries_left - 1, tag, @queue_cache_table)
-        catch
-          :exit, reason ->
-            Logger.error(
-              "EXIT signal with #{reason |> inspect()} - fail to process a message:\n#{payload}\nQueue:#{
-                @queue
-              }"
-            )
-
-            status = Queue.status(chan, @queue)
-            Logger.error("Queue status: #{inspect(status)}")
         end
       end
     end

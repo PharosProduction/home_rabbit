@@ -1,6 +1,6 @@
 defmodule HomeRabbit.ChannelPool do
   alias HomeRabbit.ConnectionManager
-  alias AMQP.{Channel, Basic, Queue, Exchange}
+  alias AMQP.{Channel, Basic}
 
   require Logger
 
@@ -50,7 +50,7 @@ defmodule HomeRabbit.ChannelPool do
 
   @impl true
   def handle_cast({:release_channel, channel}, pool) do
-    limit = Application.get_env(:home_rabbit, :max_cannels, :infinite)
+    limit = Application.get_env(:home_rabbit, :max_cannels, 1)
     count = Enum.count(pool)
     Logger.debug("Channel limit: #{limit}")
 
@@ -71,8 +71,27 @@ defmodule HomeRabbit.ChannelPool do
     end
   end
 
-  defp read_settings({application_name, file}) do
-    priv_dir = :code.priv_dir(application_name)
-    Path.expand(file, priv_dir) |> Code.eval_file()
+  @impl true
+  def handle_info({:EXIT, _from, reason}, pool) do
+    pool |> Enum.each(&Channel.close/1)
+
+    case reason do
+      :shutdown -> Logger.info("#{__MODULE__} exiting with reason: :shutdown")
+      reason -> Logger.error("#{__MODULE__} exiting with reason: #{reason |> inspect()}")
+    end
+
+    {:stop, reason, []}
+  end
+
+  @impl true
+  def terminate(reason, pool) do
+    pool |> Enum.each(&Channel.close/1)
+
+    case reason do
+      :shutdown -> Logger.info("#{__MODULE__} terminating with reason: :shutdown")
+      reason -> Logger.error("#{__MODULE__} terminating with reason: #{reason |> inspect()}")
+    end
+
+    []
   end
 end
