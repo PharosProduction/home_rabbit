@@ -1,14 +1,10 @@
 defmodule HomeRabbit.ChannelPool do
   alias HomeRabbit.ConnectionManager
-  alias AMQP.{Channel, Basic, Queue, Exchange}
+  alias AMQP.{Channel, Basic}
 
-  import HomeRabbit.Configuration.ExchangeBuilder
   require Logger
 
   use GenServer
-
-  @errors_exchange_name "errors_exchange"
-  @errors_queue "errors_queue"
 
   # Client
   def start_link(_opts) do
@@ -28,19 +24,6 @@ defmodule HomeRabbit.ChannelPool do
   def init(_opts) do
     {:ok, con} = ConnectionManager.get_connection()
     {:ok, chan} = Channel.open(con)
-
-    direct(@errors_exchange_name, [
-      queue(@errors_queue, @errors_queue)
-    ])
-
-    case Application.get_env(:home_rabbit, :exchanges_configuration) do
-      nil -> nil
-      settings when settings |> is_list() -> settings |> Enum.each(&read_settings/1)
-      settings -> read_settings(settings)
-    end
-
-    Application.get_env(:home_rabbit, :exchanges)
-    |> Enum.each(&setup_exchange(chan, &1))
 
     # TODO: do I really need this?
     :ok = Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
@@ -67,7 +50,7 @@ defmodule HomeRabbit.ChannelPool do
 
   @impl true
   def handle_cast({:release_channel, channel}, pool) do
-    limit = Application.get_env(:home_rabbit, :max_cannels, :infinite)
+    limit = Application.get_env(:home_rabbit, :max_cannels, 1)
     count = Enum.count(pool)
     Logger.debug("Channel limit: #{limit}")
 
@@ -88,75 +71,27 @@ defmodule HomeRabbit.ChannelPool do
     end
   end
 
-  # Setup
+  @impl true
+  def handle_info({:EXIT, _from, reason}, pool) do
+    pool |> Enum.each(&Channel.close/1)
 
-  defp setup_exchange(chan, {exchange, type, queues}) do
-    with :ok <- Exchange.declare(chan, exchange, type, durable: true) do
-      Logger.debug("Exchange was declared:\nExchange: #{exchange}\nType: #{type |> inspect()}")
-
-      case type do
-        :fanout ->
-          queues
-          |> Enum.each(&setup_queue(chan, exchange, &1, fn -> Queue.bind(chan, &1, exchange) end))
-
-        :topic ->
-          queues
-          |> Enum.each(fn {queue, key} ->
-            setup_queue(chan, exchange, queue, fn ->
-              Queue.bind(chan, queue, exchange, routing_key: key)
-            end)
-          end)
-
-        :direct ->
-          queues
-          |> Enum.each(fn {queue, key} ->
-            setup_queue(chan, exchange, queue, fn ->
-              Queue.bind(chan, queue, exchange, routing_key: key)
-            end)
-          end)
-
-        :headers ->
-          queues
-          |> Enum.each(fn {queue, args, x_match} ->
-            setup_queue(chan, exchange, queue, fn ->
-              Queue.bind(chan, queue, exchange, arguments: args ++ [x_match])
-            end)
-          end)
-      end
-    else
-      {:error, reason} ->
-        Logger.error("Failed exchange setup:\nExchange: #{exchange}\nReason: #{reason}")
+    case reason do
+      :shutdown -> Logger.info("#{__MODULE__} exiting with reason: :shutdown")
+      reason -> Logger.error("#{__MODULE__} exiting with reason: #{reason |> inspect()}")
     end
+
+    {:stop, reason, []}
   end
 
-  defp setup_queue(chan, exchange, queue, bind_fn) do
-    with {:ok, _res} <- declare_queue(chan, queue, @errors_queue),
-         :ok <- bind_fn.() do
-      Logger.debug(
-        "Queue was declared and bound to exchange:\nQueue: #{queue}\nExchange: #{exchange}"
-      )
-    else
-      {:error, reason} ->
-        Logger.error("Failed queue setup:\nQueue: #{queue}\nReason: #{reason}")
-    end
-  end
+  @impl true
+  def terminate(reason, pool) do
+    pool |> Enum.each(&Channel.close/1)
 
-  defp declare_queue(chan, queue, error_queue_name) do
-    if queue == error_queue_name do
-      Queue.declare(chan, queue, durable: true)
-    else
-      Queue.declare(chan, queue,
-        durable: true,
-        arguments: [
-          {"x-dead-letter-exchange", :longstr, @errors_exchange_name},
-          {"x-dead-letter-routing-key", :longstr, error_queue_name}
-        ]
-      )
+    case reason do
+      :shutdown -> Logger.info("#{__MODULE__} terminating with reason: :shutdown")
+      reason -> Logger.error("#{__MODULE__} terminating with reason: #{reason |> inspect()}")
     end
-  end
 
-  defp read_settings({application_name, file}) do
-    priv_dir = :code.priv_dir(application_name)
-    Path.expand(file, priv_dir) |> Code.eval_file()
+    []
   end
 end
