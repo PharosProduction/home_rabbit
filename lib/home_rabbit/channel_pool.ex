@@ -19,16 +19,13 @@ defmodule HomeRabbit.ChannelPool do
     GenServer.call(__MODULE__, :get_channel)
   end
 
+  defdelegate close_channel(channel), to: Channel, as: :close
+
   # Server
   @impl true
   def init(_opts) do
-    {:ok, con} = ConnectionManager.get_connection()
-    {:ok, chan} = Channel.open(con)
-
-    # TODO: do I really need this?
-    :ok = Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
-
-    {:ok, [chan]}
+    send(self(), :connect)
+    {:ok, []}
   end
 
   @impl true
@@ -37,14 +34,16 @@ defmodule HomeRabbit.ChannelPool do
       [chan | rest] = pool
       {:reply, {:ok, chan}, rest}
     else
-      {:ok, con} = ConnectionManager.get_connection()
-      {:ok, chan} = Channel.open(con)
+      with {:ok, conn} <- ConnectionManager.get_connection(),
+           {:ok, chan} <- Channel.open(conn) do
+        # TODO: do I really need this?
+        :ok =
+          Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
 
-      # TODO: do I really need this?
-      :ok =
-        Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
-
-      {:reply, {:ok, chan}, pool}
+        {:reply, {:ok, chan}, pool}
+      else
+        _ -> {:error, :not_connected}
+      end
     end
   end
 
@@ -69,6 +68,34 @@ defmodule HomeRabbit.ChannelPool do
         Logger.debug("Channel count: #{count + 1}")
         {:noreply, [channel | pool]}
     end
+  end
+
+  @impl true
+  def handle_info(:connect, _conn) do
+    reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
+
+    with {:ok, conn} <- ConnectionManager.get_connection(),
+         {:ok, chan} <- Channel.open(conn) do
+      # Get notifications when the connection goes down
+      Process.monitor(conn.pid)
+      # TODO: do I really need this?
+      :ok =
+        Basic.qos(chan, prefetch_count: Application.get_env(:home_rabbit, :prefetch_count, 10))
+
+      {:noreply, [chan]}
+    else
+      {:error, _} ->
+        # Retry later
+        Process.send_after(self(), :connect, reconnect_interval)
+        {:noreply, nil}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, _, :process, _pid, reason}, pool) do
+    # Stop GenServer. Will be restarted by Supervisor.
+    pool |> Enum.each(&Channel.close/1)
+    {:stop, {:connection_lost, reason}, nil}
   end
 
   @impl true

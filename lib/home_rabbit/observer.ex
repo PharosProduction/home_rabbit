@@ -51,14 +51,38 @@ defmodule HomeRabbit.Observer do
       @impl true
       def init(_) do
         Process.flag(:trap_exit, true)
-        {:ok, chan} = ChannelPool.get_channel()
-        # Register the GenServer process as a consumer
-        {:ok, _consumer_tag} = Basic.consume(chan, @queue)
+        send(self(), :connect)
+        {:ok, nil}
+      end
 
-        KV.add_table(@queue_cache_table)
+      @impl true
+      def handle_info(:connect, _conn) do
+        reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
 
-        Logger.debug("Observer #{__MODULE__} initialized")
-        {:ok, chan}
+        with {:ok, chan} <- ChannelPool.get_channel() do
+          # Get notifications when the connection goes down
+          Process.monitor(chan.pid)
+
+          # Register the GenServer process as a consumer
+          {:ok, _consumer_tag} = Basic.consume(chan, @queue)
+
+          KV.add_table(@queue_cache_table)
+          Logger.debug("Observer #{__MODULE__} initialized")
+
+          {:noreply, chan}
+        else
+          {:error, _} ->
+            # Retry later
+            Process.send_after(self(), :connect, reconnect_interval)
+            {:noreply, nil}
+        end
+      end
+
+      @impl true
+      def handle_info({:DOWN, _, :process, _pid, reason}, chan) do
+        # Stop GenServer. Will be restarted by Supervisor.
+        ChannelPool.close_channel(chan)
+        {:stop, {:connection_lost, reason}, nil}
       end
 
       # Confirmation sent by the broker after registering this process as a consumer

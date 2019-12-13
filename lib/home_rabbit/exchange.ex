@@ -91,13 +91,28 @@ defmodule HomeRabbit.Exchange do
       # Server
       @impl true
       def init(_opts) do
-        {:ok, chan} = ChannelPool.get_channel()
-
-        setup_exchange(chan, @queues)
-
-        ChannelPool.release_channel(chan)
-
+        send(self(), :connect)
         {:ok, nil}
+      end
+
+      @impl true
+      def handle_info(:connect, _conn) do
+        reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
+
+        with {:ok, chan} <- ChannelPool.get_channel() do
+          {:ok, chan} = ChannelPool.get_channel()
+
+          setup_exchange(chan, @queues)
+
+          ChannelPool.release_channel(chan)
+
+          {:noreply, nil}
+        else
+          {:error, _} ->
+            # Retry later
+            Process.send_after(self(), :connect, reconnect_interval)
+            {:noreply, nil}
+        end
       end
 
       # Setup
