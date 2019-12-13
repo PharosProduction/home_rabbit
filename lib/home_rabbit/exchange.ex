@@ -56,6 +56,7 @@ defmodule HomeRabbit.Exchange do
       def publish(routing_key: routing_key, payload: payload, options: options) do
         {:ok, chan} = ChannelPool.get_channel()
         :ok = Basic.publish(chan, @exchange, routing_key, payload, options)
+        Logger.debug("Message published to route #{routing_key}")
         ChannelPool.release_channel(chan)
       end
 
@@ -65,6 +66,7 @@ defmodule HomeRabbit.Exchange do
         :ok =
           Basic.publish(chan, @exchange, routing_key, payload, message |> Map.get(:options, []))
 
+        Logger.debug("Message published to route #{routing_key}")
         ChannelPool.release_channel(chan)
       end
 
