@@ -42,7 +42,7 @@ defmodule HomeRabbit.ChannelPool do
 
         {:reply, {:ok, chan}, pool}
       else
-        _ -> {:error, :not_connected}
+        _ -> {:reply, {:error, :not_connected}, pool}
       end
     end
   end
@@ -65,8 +65,8 @@ defmodule HomeRabbit.ChannelPool do
 
       wrong_argument ->
         Logger.warn("Wrong configuration for :home_rabbit :max_channels: #{wrong_argument}")
-        Logger.debug("Channel count: #{count + 1}")
-        {:noreply, [channel | pool]}
+        Logger.debug("Channel count: #{count}")
+        {:noreply, [pool]}
     end
   end
 
@@ -87,7 +87,7 @@ defmodule HomeRabbit.ChannelPool do
       {:error, _} ->
         # Retry later
         Process.send_after(self(), :connect, reconnect_interval)
-        {:noreply, nil}
+        {:noreply, []}
     end
   end
 
