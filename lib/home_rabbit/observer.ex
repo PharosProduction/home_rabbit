@@ -67,11 +67,6 @@ defmodule HomeRabbit.Observer do
         {:noreply, chan}
       end
 
-      @impl true
-      def handle_info({_ref, :ok}, %AMQP.Channel{} = chan) do
-        {:noreply, chan}
-      end
-
       # Sent by the broker when the consumer is unexpectedly cancelled (such as after a queue deletion)
       @impl true
       def handle_info({:basic_cancel, %{consumer_tag: consumer_tag}}, chan) do
