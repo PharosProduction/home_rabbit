@@ -53,7 +53,8 @@ defmodule HomeRabbit.Exchange do
       @errors_exchange Keyword.get(opts, :errors_exchange, nil)
 
       @spec publish(message :: HomeRabbit.message()) :: :ok | {:error, reason :: term}
-      def publish(routing_key: routing_key, payload: payload, options: options) do
+      def publish(routing_key: routing_key, payload: payload, options: options)
+          when payload |> is_binary() do
         {:ok, chan} = ChannelPool.get_channel()
         :ok = Basic.publish(chan, @exchange, routing_key, payload, options)
 
@@ -66,7 +67,8 @@ defmodule HomeRabbit.Exchange do
         ChannelPool.release_channel(chan)
       end
 
-      def publish(%{routing_key: routing_key, payload: payload} = message) do
+      def publish(%{routing_key: routing_key, payload: payload} = message)
+          when payload |> is_binary() do
         {:ok, chan} = ChannelPool.get_channel()
         options = message |> Map.get(:options, [])
         :ok = Basic.publish(chan, @exchange, routing_key, payload, options)
@@ -79,6 +81,8 @@ defmodule HomeRabbit.Exchange do
 
         ChannelPool.release_channel(chan)
       end
+
+      def publish(message), do: {:error, {:wrong_payload_format, message}}
 
       def start_link(_opts) do
         GenServer.start_link(__MODULE__, nil, name: __MODULE__)

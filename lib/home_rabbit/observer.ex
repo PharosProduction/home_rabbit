@@ -123,7 +123,7 @@ defmodule HomeRabbit.Observer do
           :ok = Basic.ack(chan, tag)
         rescue
           e ->
-            {:ok, retries_left} = KV.get(tag, @queue)
+            {:ok, retries_left} = KV.get(tag, @queue_cache_table)
 
             Logger.error(
               "Error while processing message:\n#{payload |> inspect()}\nError:#{e |> inspect()}\nRetries left: #{
