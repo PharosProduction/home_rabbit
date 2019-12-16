@@ -4,6 +4,14 @@ defmodule HomeRabbit.Observer do
 
   ## Examples
   ```elixir
+    iex> defmodule TestObserver do
+    ...>   use HomeRabbit.Observer, queue: "test_observer_queue"
+    ...>   @impl true
+    ...>   def handle(message) do
+    ...>     Logger.debug(message)
+    ...>   end
+    ...> end
+    ...> start_supervised!(TestObserver)
     iex> defmodule TestObserverExchange do
     ...>   use HomeRabbit.Exchange.Direct, exchange: "test_observer_exchange", queues: [[queue: "test_observer_queue", routing_key: "test_observer"]]
     ...>   defmessage SayHiMessage do
@@ -13,14 +21,6 @@ defmodule HomeRabbit.Observer do
     ...>   end
     ...> end
     iex> start_supervised!(TestObserverExchange)
-    iex> defmodule TestObserver do
-    ...>   use HomeRabbit.Observer, queue: "test_observer_queue"
-    ...>   @impl true
-    ...>   def handle(message) do
-    ...>     Logger.debug(message)
-    ...>   end
-    ...> end
-    ...> start_supervised!(TestObserver)
     iex> TestObserverExchange.publish(TestObserverExchange.SayHiMessage.new())
     :ok
 
@@ -43,6 +43,8 @@ defmodule HomeRabbit.Observer do
       @queue opts[:queue]
       @queue_cache_table __MODULE__
       @max_retries opts |> Keyword.get(:max_retries, 0)
+      @errors_queue opts |> Keyword.get(:errors_queue, nil)
+      @errors_exchange opts |> Keyword.get(:errors_exchange, nil)
 
       def start_link(_opts) do
         GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -60,7 +62,8 @@ defmodule HomeRabbit.Observer do
         reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
 
         with {:ok, chan} <- ChannelPool.get_channel(),
-             :ok <- consume(chan) do
+             :ok <- declare_queue(chan),
+             {:ok, _} <- Basic.consume(chan, @queue) do
           # Get notifications when the connection goes down
           Process.monitor(chan.pid)
 
@@ -79,7 +82,7 @@ defmodule HomeRabbit.Observer do
       @impl true
       def handle_info({:DOWN, _, :process, _pid, reason}, chan) do
         # Stop GenServer. Will be restarted by Supervisor.
-        ChannelPool.close_channel(chan)
+        ChannelPool.release_channel(chan)
         {:stop, {:connection_lost, reason}, nil}
       end
 
@@ -158,16 +161,21 @@ defmodule HomeRabbit.Observer do
         end
       end
 
-      defp consume(chan) do
-        # Register the GenServer process as a consumer
-        with {:ok, _consumer_tag} <- Basic.consume(chan, @queue) do
-          :ok
+      defp declare_queue(chan) do
+        if @queue == @errors_queue or is_nil(@errors_queue) do
+          Queue.declare(chan, @queue, durable: true)
         else
-          _ ->
-            ChannelPool.close_channel(chan)
-            Logger.warn("Queue #{@queue} not found")
-            {:error, :queue_not_found}
+          Queue.declare(chan, @queue,
+            durable: true,
+            arguments: [
+              {"x-dead-letter-exchange", :longstr, @errors_exchange},
+              {"x-dead-letter-routing-key", :longstr, @errors_queue}
+            ]
+          )
         end
+
+        Logger.debug("Declared queue: #{@queue}")
+        :ok
       end
     end
   end

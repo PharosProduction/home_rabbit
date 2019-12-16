@@ -19,10 +19,6 @@ defmodule HomeRabbit.ChannelPool do
     GenServer.call(__MODULE__, :get_channel)
   end
 
-  def close_channel(channel) when not is_nil(channel), do: Channel.close(channel)
-
-  def close_channel(nil), do: :ok
-
   # Server
   @impl true
   def init(_opts) do
@@ -47,6 +43,11 @@ defmodule HomeRabbit.ChannelPool do
         _ -> {:reply, {:error, :not_connected}, pool}
       end
     end
+  end
+
+  @impl true
+  def handle_cast({:release_channel, nil}, pool) do
+    {:noreply, pool}
   end
 
   @impl true
@@ -123,4 +124,8 @@ defmodule HomeRabbit.ChannelPool do
 
     []
   end
+
+  defp close_channel(channel) when not is_nil(channel), do: Channel.close(channel)
+
+  defp close_channel(nil), do: :ok
 end

@@ -128,7 +128,6 @@ defmodule HomeRabbit.Exchange do
         reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
 
         with {:ok, chan} <- ChannelPool.get_channel() do
-          {:ok, chan} = ChannelPool.get_channel()
 
           setup_exchange(chan, @queues)
 
