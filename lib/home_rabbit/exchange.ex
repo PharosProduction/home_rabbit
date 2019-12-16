@@ -77,26 +77,20 @@ defmodule HomeRabbit.Exchange do
         )
 
         KV.put(rest, :requests, @exchange_table)
-        process_requests(rest)
+        process_requests(rest, chan)
       end
 
       defp process_requests([], chan), do: ChannelPool.release_channel(chan)
 
-      defp process_requests(from) do
+      defp process_requests() do
         with {:ok, true} <- KV.get(:setup_finished, @exchange_table),
              {:ok, chan} <- ChannelPool.get_channel(),
              {:ok, requests} <- KV.get(:requests, @exchange_table) do
           requests |> process_requests(chan)
         else
           _ ->
-            pid = self()
             reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
-
-            spawn_link(fn ->
-              Process.sleep(reconnect_interval)
-              result = GenServer.call(pid, :process_requests)
-              GenServer.reply(from, result)
-            end)
+            Process.send_after(self(), :process_requests, reconnect_interval)
         end
       end
 
@@ -116,17 +110,17 @@ defmodule HomeRabbit.Exchange do
       end
 
       @impl true
-      def handle_call(:process_requests, from, state) do
-        process_requests(from)
-        {:noreply, state}
-      end
-
-      @impl true
       def handle_call({:publish, request}, from, state) do
         {:ok, requests} = KV.get(:requests, @exchange_table)
         KV.put([request | requests], :requests, @exchange_table)
-        process_requests(from)
+        process_requests()
         {:reply, :ok, state}
+      end
+
+      @impl true
+      def handle_info(:process_requests, _conn) do
+        process_requests()
+        {:noreply, nil}
       end
 
       @impl true
