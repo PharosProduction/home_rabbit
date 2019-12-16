@@ -59,12 +59,10 @@ defmodule HomeRabbit.Observer do
       def handle_info(:connect, _conn) do
         reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
 
-        with {:ok, chan} <- ChannelPool.get_channel() do
+        with {:ok, chan} <- ChannelPool.get_channel(),
+             :ok <- consume(chan) do
           # Get notifications when the connection goes down
           Process.monitor(chan.pid)
-
-          # Register the GenServer process as a consumer
-          {:ok, _consumer_tag} = Basic.consume(chan, @queue)
 
           KV.add_table(@queue_cache_table)
           Logger.debug("Observer #{__MODULE__} initialized")
@@ -157,6 +155,18 @@ defmodule HomeRabbit.Observer do
 
             Basic.reject(chan, tag, retries_left > 0)
             KV.put(retries_left - 1, tag, @queue_cache_table)
+        end
+      end
+
+      defp consume(chan) do
+        # Register the GenServer process as a consumer
+        with {:ok, _consumer_tag} <- Basic.consume(chan, @queue) do
+          :ok
+        else
+          _ ->
+            ChannelPool.close_channel(chan)
+            Logger.warn("Queue #{@queue} not found")
+            {:error, :queue_not_found}
         end
       end
     end
