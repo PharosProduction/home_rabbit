@@ -19,7 +19,9 @@ defmodule HomeRabbit.ChannelPool do
     GenServer.call(__MODULE__, :get_channel)
   end
 
-  defdelegate close_channel(channel), to: Channel, as: :close
+  def close_channel(channel) when not is_nil(channel), do: Channel.close(channel)
+
+  def close_channel(nil), do: :ok
 
   # Server
   @impl true
@@ -59,7 +61,7 @@ defmodule HomeRabbit.ChannelPool do
         {:noreply, [channel | pool]}
 
       limit when limit <= count ->
-        Channel.close(channel)
+        close_channel(channel)
         Logger.debug("Channel count: #{count}")
         {:noreply, pool}
 
@@ -94,13 +96,13 @@ defmodule HomeRabbit.ChannelPool do
   @impl true
   def handle_info({:DOWN, _, :process, _pid, reason}, pool) do
     # Stop GenServer. Will be restarted by Supervisor.
-    pool |> Enum.each(&Channel.close/1)
+    pool |> Enum.each(&close_channel/1)
     {:stop, {:connection_lost, reason}, nil}
   end
 
   @impl true
   def handle_info({:EXIT, _from, reason}, pool) do
-    pool |> Enum.each(&Channel.close/1)
+    pool |> Enum.each(&close_channel/1)
 
     case reason do
       :shutdown -> Logger.info("#{__MODULE__} exiting with reason: :shutdown")
@@ -112,7 +114,7 @@ defmodule HomeRabbit.ChannelPool do
 
   @impl true
   def terminate(reason, pool) do
-    pool |> Enum.each(&Channel.close/1)
+    pool |> Enum.each(&close_channel/1)
 
     case reason do
       :shutdown -> Logger.info("#{__MODULE__} terminating with reason: :shutdown")
