@@ -51,26 +51,23 @@ defmodule HomeRabbit.Exchange do
       @queues opts[:queues]
       @errors_queue Keyword.get(opts, :errors_queue, nil)
       @errors_exchange Keyword.get(opts, :errors_exchange, nil)
+      @exchange_table __MODULE__
 
       @spec publish(message :: HomeRabbit.message()) :: :ok | {:error, reason :: term}
       def publish(routing_key: routing_key, payload: payload, options: options)
           when payload |> is_binary() do
-        {:ok, chan} = ChannelPool.get_channel()
-        :ok = Basic.publish(chan, @exchange, routing_key, payload, options)
-
-        Logger.debug(
-          "Message published to exchange #{@exchange} with routing key: #{routing_key} and options: #{
-            options |> inspect()
-          }"
-        )
-
-        ChannelPool.release_channel(chan)
+            GenServer.call(__MODULE__, {:publish, routing_key: routing_key, payload: payload, options: options})
       end
 
       def publish(%{routing_key: routing_key, payload: payload} = message)
           when payload |> is_binary() do
-        {:ok, chan} = ChannelPool.get_channel()
         options = message |> Map.get(:options, [])
+            GenServer.call(__MODULE__, {:publish, routing_key: routing_key, payload: payload, options: options})
+      end
+
+      def publish(message), do: {:error, {:wrong_payload_format, message}}
+
+      defp process_requests([[routing_key: routing_key, payload: payload, options: options] | rest], chan) do
         :ok = Basic.publish(chan, @exchange, routing_key, payload, options)
 
         Logger.debug(
@@ -79,10 +76,29 @@ defmodule HomeRabbit.Exchange do
           }"
         )
 
-        ChannelPool.release_channel(chan)
+        KV.put(rest, :requests, @exchange_table)
+        process_requests(rest)
       end
 
-      def publish(message), do: {:error, {:wrong_payload_format, message}}
+      defp process_requests([], chan), do: ChannelPool.release_channel(chan)
+
+      defp process_requests(from) do
+        with {:ok, true} <- KV.get(:setup_finished, @exchange_table),
+             {:ok, chan} <- ChannelPool.get_channel(),
+             {:ok, requests} <- KV.get(:requests, @exchange_table) do
+          requests |> process_requests(chan)
+        else
+          _ ->
+            pid = self()
+            reconnect_interval = Application.get_env(:home_rabbit, :reconnect_interval, 10_000)
+
+            spawn_link(fn ->
+              Process.sleep(reconnect_interval)
+              result = GenServer.call(pid, :process_requests)
+              GenServer.reply(from, result)
+            end)
+        end
+      end
 
       def start_link(_opts) do
         GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -91,8 +107,26 @@ defmodule HomeRabbit.Exchange do
       # Server
       @impl true
       def init(_opts) do
+        KV.add_table(@exchange_table)
+        KV.put(false, :setup_finished, @exchange_table)
+        KV.put([], :requests, @exchange_table)
+
         send(self(), :connect)
         {:ok, nil}
+      end
+
+      @impl true
+      def handle_call(:process_requests, from, state) do
+        process_requests(from)
+        {:noreply, state}
+      end
+
+      @impl true
+      def handle_call({:publish, request}, from, state) do
+        {:ok, requests} = KV.get(:requests, @exchange_table)
+        KV.put([request | requests], :requests, @exchange_table)
+        process_requests(from)
+        {:reply, :ok, state}
       end
 
       @impl true
@@ -105,6 +139,8 @@ defmodule HomeRabbit.Exchange do
           setup_exchange(chan, @queues)
 
           ChannelPool.release_channel(chan)
+
+          KV.put(true, :setup_finished, @exchange_table)
 
           {:noreply, nil}
         else

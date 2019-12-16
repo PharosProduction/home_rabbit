@@ -41,7 +41,7 @@ defmodule HomeRabbit.Observer do
       @behaviour Observer
 
       @queue opts[:queue]
-      @queue_cache_table :"#{@queue}"
+      @queue_cache_table __MODULE__
       @max_retries opts |> Keyword.get(:max_retries, 0)
 
       def start_link(_opts) do
