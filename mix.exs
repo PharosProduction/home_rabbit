@@ -23,7 +23,7 @@ defmodule HomeRabbit.MixProject do
   defp deps do
     [
       {:amqp, "~> 1.3.2"},
-      {:k_v, github: "yarrem/kv"},
+      {:k_v, github: "PharosProduction/kv"},
     ]
   end
 end
